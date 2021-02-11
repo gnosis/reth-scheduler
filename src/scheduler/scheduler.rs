@@ -7,6 +7,7 @@ use super::{
     protocol::{EthMessageId, MessageId, ParityMessageId, ProtocolId},
 };
 use crate::{
+    block_manager::BlockManager,
     client_adapter::client_info::{Client, Snapshot},
     devp2p_adapter::{
         adapter::{Devp2pAdapter, Devp2pInbound},
@@ -37,6 +38,8 @@ pub struct Scheduler {
     peer_organizer: Arc<Mutex<PeerOrganizer>>,
     client: Arc<dyn Client>,
     snapshot: Arc<dyn Snapshot>,
+
+    block_manager: Mutex<BlockManager>,
     //pending_packages: u32,
     /*
     block_manager,
@@ -68,6 +71,7 @@ impl Scheduler {
             peer_organizer: PeerOrganizer::new(devp2p.clone()),
             state: Mutex::new(SchedulerState::WaitingPeer),
             handshake: Mutex::new(Handshake::new()),
+            block_manager: Mutex::new(BlockManager {}),
             main_loop_trigger: Mutex::new(tx),
             thread_handle: Mutex::new(None),
             client,
@@ -178,9 +182,15 @@ impl Scheduler {
             EthMessageId::BlockBodies => {}
             EthMessageId::NewBlockHashes => {}
             EthMessageId::Transactions => {}
-            EthMessageId::GetBlockHeaders => {}
+            EthMessageId::GetBlockHeaders => {
+                info!("Responding peer {} with dummy BlockHeaders message", peer);
+                return self.block_manager.lock().unwrap().api_get_block_headers(peer);
+            }
             EthMessageId::BlockHeaders => {}
-            EthMessageId::GetBlockBodies => {}
+            EthMessageId::GetBlockBodies => {
+                info!("Responding peer {} with dummy BlockBodies message", peer);
+                return self.block_manager.lock().unwrap().api_get_block_bodies(peer);
+            }
             EthMessageId::NewBlock => {}
             // NewPooledTransactionHashes = 0x08, // eth/65 protocol
             // GetPooledTransactions = 0x09, // eth/65 protocol
