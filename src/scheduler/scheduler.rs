@@ -8,7 +8,11 @@ use super::{
 };
 use crate::{
     block_manager::BlockManager,
-    client_adapter::client_info::{Client, Snapshot},
+    client_adapter::{
+        Blockchain,
+        client_info::{Client, Snapshot},
+        headers_in_memory::HeadersInMemory,
+    },
     devp2p_adapter::{
         adapter::{Devp2pAdapter, Devp2pInbound},
         PeerPenal,
@@ -39,7 +43,7 @@ pub struct Scheduler {
     client: Arc<dyn Client>,
     snapshot: Arc<dyn Snapshot>,
 
-    block_manager: Mutex<BlockManager>,
+    block_manager: Arc<Mutex<BlockManager>>,
     //pending_packages: u32,
     /*
     block_manager,
@@ -67,11 +71,12 @@ impl Scheduler {
     ) -> Arc<Scheduler> {
         let devp2p = Arc::new(devp2p);
         let (tx, rx) = channel::<LoopMsg>();
+        let chain = Arc::new(HeadersInMemory::new());
         let org = Arc::new(Scheduler {
             peer_organizer: PeerOrganizer::new(devp2p.clone()),
             state: Mutex::new(SchedulerState::WaitingPeer),
             handshake: Mutex::new(Handshake::new()),
-            block_manager: Mutex::new(BlockManager {}),
+            block_manager: Arc::new(Mutex::new(BlockManager::new(chain))),
             main_loop_trigger: Mutex::new(tx),
             thread_handle: Mutex::new(None),
             client,
@@ -183,10 +188,14 @@ impl Scheduler {
             EthMessageId::NewBlockHashes => {}
             EthMessageId::Transactions => {}
             EthMessageId::GetBlockHeaders => {
+                info!("Got GetBlockHeaders message with payload: {:?}", data);
                 info!("Responding peer {} with dummy BlockHeaders message", peer);
                 return self.block_manager.lock().unwrap().api_get_block_headers(peer);
             }
-            EthMessageId::BlockHeaders => {}
+            EthMessageId::BlockHeaders => {
+                info!("Got BlockHeaders message from {}", peer);
+                // TODO
+            }
             EthMessageId::GetBlockBodies => {
                 info!("Responding peer {} with dummy BlockBodies message", peer);
                 return self.block_manager.lock().unwrap().api_get_block_bodies(peer);
