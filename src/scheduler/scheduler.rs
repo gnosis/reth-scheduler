@@ -71,12 +71,14 @@ impl Scheduler {
     ) -> Arc<Scheduler> {
         let devp2p = Arc::new(devp2p);
         let (tx, rx) = channel::<LoopMsg>();
-        let chain = Arc::new(HeadersInMemory::new());
+        let chain = Arc::new(Mutex::new(HeadersInMemory::new()));
+        let peer_organizer = PeerOrganizer::new(devp2p.clone());
+        let block_manager = BlockManager::new(chain, peer_organizer.clone());
         let org = Arc::new(Scheduler {
-            peer_organizer: PeerOrganizer::new(devp2p.clone()),
+            peer_organizer: peer_organizer,
             state: Mutex::new(SchedulerState::WaitingPeer),
             handshake: Mutex::new(Handshake::new()),
-            block_manager: Arc::new(Mutex::new(BlockManager::new(chain))),
+            block_manager: block_manager,
             main_loop_trigger: Mutex::new(tx),
             thread_handle: Mutex::new(None),
             client,
@@ -125,6 +127,7 @@ impl Scheduler {
     }
 
     pub fn main_loop(&self) {
+        self.block_manager.lock().and_then(|b| { b.sync(); Ok(()) });
         let mut org = self.peer_organizer.lock().unwrap();
         let failed_tasks = org.tick();
         if failed_tasks.len() != 0 {
@@ -188,13 +191,12 @@ impl Scheduler {
             EthMessageId::NewBlockHashes => {}
             EthMessageId::Transactions => {}
             EthMessageId::GetBlockHeaders => {
-                info!("Got GetBlockHeaders message with payload: {:?}", data);
                 info!("Responding peer {} with dummy BlockHeaders message", peer);
                 return self.block_manager.lock().unwrap().api_get_block_headers(peer);
             }
             EthMessageId::BlockHeaders => {
                 info!("Got BlockHeaders message from {}", peer);
-                // TODO
+                self.block_manager.lock().unwrap().process_block_headers(&data);
             }
             EthMessageId::GetBlockBodies => {
                 info!("Responding peer {} with dummy BlockBodies message", peer);

@@ -208,6 +208,23 @@ impl PeerOrganizer {
         &self.peers
     }
 
+    pub fn random_peer(&self) -> Option<PeerId> {
+        match self.peers.keys().next() {
+            Some(peer) => Some(*peer),
+            None => None,
+        }
+    }
+
+    pub fn schedule(&mut self, task: Task) {
+        let task_id = Task::new_id();
+        let peer_id = &task.peer_id().unwrap();
+        let peers_tasks = &mut self.peers.get_mut(peer_id).unwrap().tasks;
+        if peers_tasks.len() == 0 {
+            peers_tasks.insert(task_id);
+        }
+        self.push_task(task, Some(task_id));
+    }
+
     pub fn new(devp2p: Arc<Box<dyn Devp2pAdapter>>) -> Arc<Mutex<PeerOrganizer>> {
         let peer_org = Arc::new(Mutex::new(PeerOrganizer {
             peers: HashMap::new(),
@@ -230,7 +247,6 @@ impl PeerOrganizer {
         let now = Instant::now();
         let mut timeouted_tasks = Vec::new();
         let mut rem_ids = Vec::new();
-        info!("Tasks: {:?}", self.pending_tasks);
         for (id, task) in self.pending_tasks.iter_mut() {
             //check timeout, and if timeouted call organizer to notify managers that request task was not successfull
             if task.timeouted(&now) {
