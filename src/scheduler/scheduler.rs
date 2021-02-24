@@ -8,7 +8,11 @@ use super::{
 };
 use crate::{
     block_manager::BlockManager,
-    client_adapter::client_info::{Client, Snapshot},
+    client_adapter::{
+        Blockchain,
+        client_info::{Client, Snapshot},
+        headers_in_memory::HeadersInMemory,
+    },
     devp2p_adapter::{
         adapter::{Devp2pAdapter, Devp2pInbound},
         PeerPenal,
@@ -39,7 +43,7 @@ pub struct Scheduler {
     client: Arc<dyn Client>,
     snapshot: Arc<dyn Snapshot>,
 
-    block_manager: Mutex<BlockManager>,
+    block_manager: Arc<Mutex<BlockManager>>,
     //pending_packages: u32,
     /*
     block_manager,
@@ -67,11 +71,14 @@ impl Scheduler {
     ) -> Arc<Scheduler> {
         let devp2p = Arc::new(devp2p);
         let (tx, rx) = channel::<LoopMsg>();
+        let chain = Arc::new(Mutex::new(HeadersInMemory::new()));
+        let peer_organizer = PeerOrganizer::new(devp2p.clone());
+        let block_manager = BlockManager::new(chain, peer_organizer.clone());
         let org = Arc::new(Scheduler {
-            peer_organizer: PeerOrganizer::new(devp2p.clone()),
+            peer_organizer: peer_organizer,
             state: Mutex::new(SchedulerState::WaitingPeer),
             handshake: Mutex::new(Handshake::new()),
-            block_manager: Mutex::new(BlockManager {}),
+            block_manager: block_manager,
             main_loop_trigger: Mutex::new(tx),
             thread_handle: Mutex::new(None),
             client,
@@ -120,6 +127,7 @@ impl Scheduler {
     }
 
     pub fn main_loop(&self) {
+        self.block_manager.lock().and_then(|b| { b.sync(); Ok(()) });
         let mut org = self.peer_organizer.lock().unwrap();
         let failed_tasks = org.tick();
         if failed_tasks.len() != 0 {
@@ -186,7 +194,10 @@ impl Scheduler {
                 info!("Responding peer {} with dummy BlockHeaders message", peer);
                 return self.block_manager.lock().unwrap().api_get_block_headers(peer);
             }
-            EthMessageId::BlockHeaders => {}
+            EthMessageId::BlockHeaders => {
+                info!("Got BlockHeaders message from {}", peer);
+                self.block_manager.lock().unwrap().process_block_headers(&data);
+            }
             EthMessageId::GetBlockBodies => {
                 info!("Responding peer {} with dummy BlockBodies message", peer);
                 return self.block_manager.lock().unwrap().api_get_block_bodies(peer);

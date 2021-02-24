@@ -1,5 +1,6 @@
 pub mod client_info;
 pub mod blockchain;
+pub mod headers_in_memory;
 
 
 pub use blockchain::Blockchain;

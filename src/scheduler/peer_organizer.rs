@@ -34,10 +34,12 @@ pub enum Task {
     InsertPeer(HandshakeInfo),
     PenalPeer(PeerId, PeerPenal, String), //last is reason
     WaitForStatus(PeerId, MessageData),
+    GetBlocks(PeerId, MessageData),
     Responde(PeerId, ProtocolId, MessageId, Vec<u8>),
     None,
 }
 
+#[derive(Debug)]
 pub struct ErrorAct {
     penal: PeerPenal,
     reason: String,
@@ -87,6 +89,7 @@ impl Task {
             Self::InsertPeer(_) => TaskType::SendMsg,
             Self::PenalPeer(_, _, _) => TaskType::SendMsg,
             Self::WaitForStatus(_, _) => TaskType::StatusMsg,
+            Self::GetBlocks(_, _) => TaskType::SendMsg,
             Self::Responde(_, _, _, _) => TaskType::ResponseMsg,
             Self::None => TaskType::None,
         }
@@ -97,6 +100,7 @@ impl Task {
             Self::InsertPeer(_) => None,
             Self::PenalPeer(peer_id, _, _) => Some(*peer_id),
             Self::WaitForStatus(peer_id, _) => Some(*peer_id),
+            Self::GetBlocks(peer_id, _) => Some(*peer_id),
             Self::Responde(peer_id, _, _, _) => Some(*peer_id),
             Self::None => None,
         }
@@ -107,6 +111,7 @@ impl Task {
             Self::InsertPeer(_) => 0,
             Self::PenalPeer(_, _, _) => 0,
             Self::WaitForStatus(_, _) => 0,
+            Self::GetBlocks(_, _) => 0,
             Self::Responde(_, _, _, _) => 0,
             Self::None => 0,
         }
@@ -116,6 +121,7 @@ impl Task {
         match self {
             Self::InsertPeer(_) => None,
             Self::PenalPeer(_, _, _) => None,
+            Self::GetBlocks(_, _) => None,
             Self::Responde(_, _, _, _) => None,
             Self::WaitForStatus(_, _) => Some(Duration::from_millis(3000)), //timeout after not receiving status msg from peer
             Self::None => None,
@@ -200,6 +206,23 @@ pub struct PeerOrganizer {
 impl PeerOrganizer {
     pub fn peers(&self) -> &HashMap<PeerId, Peer> {
         &self.peers
+    }
+
+    pub fn random_peer(&self) -> Option<PeerId> {
+        match self.peers.keys().next() {
+            Some(peer) => Some(*peer),
+            None => None,
+        }
+    }
+
+    pub fn schedule(&mut self, task: Task) {
+        let task_id = Task::new_id();
+        let peer_id = &task.peer_id().unwrap();
+        let peers_tasks = &mut self.peers.get_mut(peer_id).unwrap().tasks;
+        if peers_tasks.len() == 0 {
+            peers_tasks.insert(task_id);
+        }
+        self.push_task(task, Some(task_id));
     }
 
     pub fn new(devp2p: Arc<Box<dyn Devp2pAdapter>>) -> Arc<Mutex<PeerOrganizer>> {
@@ -334,7 +357,15 @@ impl PeerOrganizer {
                 }
                 task_id
             }
-
+            Task::GetBlocks(ref peer, ref mut data) => {
+                self.devp2p
+                    .send_mesage(ProtocolId::Eth, peer, EthMessageId::GetBlockHeaders as u8, &data);
+                data.clear();
+                if task_id.is_none() {
+                    panic!("Task id should be set for GetBlocks msg");
+                }
+                task_id
+            }
             Task::Responde(ref peer_id, protocol, msg_id, ref mut msg) => {
                 self.devp2p.send_mesage(
                     protocol,
