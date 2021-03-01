@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use super::blockchain::Blockchain;
-use crate::common_types::{BlockNumber, BlockHeader};
+use crate::common_types::{BlockNumber, BlockHeader, BlockBody};
 
 pub struct HeadersInMemory {
     headers: HashMap<BlockNumber, BlockHeader>,
@@ -32,10 +32,16 @@ impl Blockchain for HeadersInMemory {
         unimplemented!()
     }
 
-    fn best_block_header(&self) -> Option<BlockHeader> { unimplemented!() }
+    fn best_block_header(&self) -> Option<&BlockNumber> {
+        self.headers.keys().max()
+    }
 
-    fn import_block(&mut self, header: &BlockHeader) {
+    fn import_block_header(&mut self, header: &BlockHeader) {
         self.headers.insert(header.number, header.clone());
+    }
+
+    fn import_block_body(&mut self, body: &BlockBody) {
+        info!("Received block body, ignoring.");
     }
 
     fn import_old_block(&self) {
