@@ -252,4 +252,11 @@ mod tests {
         assert_eq!(block_body, decoded[0]);
     }
 
+    #[test]
+    fn test_block_body_with_ommer_roundtrip() {
+        let encoded = std::fs::read("src/block_manager/test_data/block_11_927_383").unwrap();
+        let decoded = decode_block_bodies(&encoded).unwrap();
+        let recovered = encode_block_bodies(&decoded);
+        assert_eq!(encoded, recovered);
+    }
 }
