@@ -1,8 +1,8 @@
 // Copyright 2020 Gnosis Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::protocol::{MessageId, ProtocolId};
-use super::{handshake::HandshakeInfo, protocol::EthMessageId};
+use super::protocol::{EthMessageId, MessageId, ProtocolId};
+use super::handshake::HandshakeInfo;
 use crate::devp2p_adapter::{adapter::Devp2pAdapter, PeerPenal};
 use std::{
     collections::{HashMap, HashSet},
@@ -29,12 +29,24 @@ impl std::fmt::Display for CustomError {
     }
 }
 
+#[derive(Debug)]
+pub struct InitialRequest {
+    pub message_id: EthMessageId,
+    pub data: MessageData,
+}
+
+impl InitialRequest {
+    pub fn new(message_id:EthMessageId, data: MessageData) -> Self {
+        InitialRequest { message_id, data }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Task {
     InsertPeer(HandshakeInfo),
     PenalPeer(PeerId, PeerPenal, String), //last is reason
     WaitForStatus(PeerId, MessageData),
-    GetBlocks(PeerId, MessageData),
+    InitialRequest(PeerId, EthMessageId, MessageData),
     Responde(PeerId, ProtocolId, MessageId, Vec<u8>),
     None,
 }
@@ -89,7 +101,7 @@ impl Task {
             Self::InsertPeer(_) => TaskType::SendMsg,
             Self::PenalPeer(_, _, _) => TaskType::SendMsg,
             Self::WaitForStatus(_, _) => TaskType::StatusMsg,
-            Self::GetBlocks(_, _) => TaskType::SendMsg,
+            Self::InitialRequest(_, _, _) => TaskType::SendMsg,
             Self::Responde(_, _, _, _) => TaskType::ResponseMsg,
             Self::None => TaskType::None,
         }
@@ -100,7 +112,7 @@ impl Task {
             Self::InsertPeer(_) => None,
             Self::PenalPeer(peer_id, _, _) => Some(*peer_id),
             Self::WaitForStatus(peer_id, _) => Some(*peer_id),
-            Self::GetBlocks(peer_id, _) => Some(*peer_id),
+            Self::InitialRequest(peer_id, _, _) => Some(*peer_id),
             Self::Responde(peer_id, _, _, _) => Some(*peer_id),
             Self::None => None,
         }
@@ -111,7 +123,7 @@ impl Task {
             Self::InsertPeer(_) => 0,
             Self::PenalPeer(_, _, _) => 0,
             Self::WaitForStatus(_, _) => 0,
-            Self::GetBlocks(_, _) => 0,
+            Self::InitialRequest(_, _, _) => 0,
             Self::Responde(_, _, _, _) => 0,
             Self::None => 0,
         }
@@ -121,7 +133,7 @@ impl Task {
         match self {
             Self::InsertPeer(_) => None,
             Self::PenalPeer(_, _, _) => None,
-            Self::GetBlocks(_, _) => None,
+            Self::InitialRequest(_, _, _) => None,
             Self::Responde(_, _, _, _) => None,
             Self::WaitForStatus(_, _) => Some(Duration::from_millis(3000)), //timeout after not receiving status msg from peer
             Self::None => None,
@@ -206,6 +218,29 @@ pub struct PeerOrganizer {
 impl PeerOrganizer {
     pub fn peers(&self) -> &HashMap<PeerId, Peer> {
         &self.peers
+    }
+
+    fn free_peer(&self) -> Option<PeerId> {
+        for peer in self.peers.keys() {
+            let peer_tasks = self.peers.get(peer).unwrap().tasks.len();
+            if peer_tasks == 0 {
+                return Some(*peer);
+            }
+        }
+        None
+    }
+
+    pub fn schedule_to_free_peer(&mut self, request: InitialRequest) {
+        if let Some(ref peer_id) = self.free_peer() {
+            let task = Task::InitialRequest(*peer_id, request.message_id, request.data);
+            let task_id = Task::new_id();
+            let peers_tasks = &mut self.peers.get_mut(peer_id).unwrap().tasks;
+            peers_tasks.insert(task_id);
+            self.push_task(task, Some(task_id));
+        } else {
+            info!("No free peer to schedule task {:?} to", &request);
+        }
+
     }
 
     pub fn random_peer(&self) -> Option<PeerId> {
@@ -357,12 +392,12 @@ impl PeerOrganizer {
                 }
                 task_id
             }
-            Task::GetBlocks(ref peer, ref mut data) => {
+            Task::InitialRequest(ref peer, ref message_id, ref mut data) => {
                 self.devp2p
-                    .send_mesage(ProtocolId::Eth, peer, EthMessageId::GetBlockHeaders as u8, &data);
+                    .send_mesage(ProtocolId::Eth, peer, *message_id as u8, &data);
                 data.clear();
                 if task_id.is_none() {
-                    panic!("Task id should be set for GetBlocks msg");
+                    panic!("Task id should be set for InitialRequest msg");
                 }
                 task_id
             }

@@ -1,6 +1,6 @@
 // will be extracted to separate library. Maybe in util :)
 
-use primitive_types::{H160, H256};
+use primitive_types::{H160, H256, U256};
 
 pub type BlockNumber = u64;
 
@@ -24,7 +24,7 @@ impl GetBlockHeaders {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BlockHeader {
     pub parent_hash: H256,
     pub ommers_hash: H256,
@@ -41,4 +41,23 @@ pub struct BlockHeader {
     pub extra_data: Vec<u8>,
     pub mix_hash: H256,
     pub nonce: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockTransaction {
+    pub nonce: U256,
+    pub gas_price: U256,
+    pub gas_limit: U256,
+    pub to: H160,
+    pub value: U256,
+    pub input_data: Vec<u8>,
+    pub v: u8,
+    pub r: U256,
+    pub s: U256,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockBody {
+    pub transactions: Vec<BlockTransaction>,
+    pub ommers: Vec<BlockHeader>,
 }

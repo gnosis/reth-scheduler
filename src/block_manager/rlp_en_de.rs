@@ -1,9 +1,9 @@
 // Copyright 2020 Gnosis Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-use primitive_types::{H160, H256};
-use rlp::{EMPTY_LIST_RLP, RlpStream, Rlp, DecoderError};
-use crate::common_types::{BlockHeader, BlockId, BlockNumber, GetBlockHeaders};
+use primitive_types::{H160, H256, U256};
+use rlp::{RlpStream, Rlp, DecoderError};
+use crate::common_types::{BlockHeader, BlockId, BlockNumber, GetBlockHeaders, BlockBody, BlockTransaction};
 
 pub fn encode_get_block_headers(request: &GetBlockHeaders) -> Vec<u8> {
     let mut stream = RlpStream::new_list(4);
@@ -42,39 +42,147 @@ pub fn decode_get_block_headers(data: &Vec<u8>) -> Result<GetBlockHeaders, Decod
     Ok(GetBlockHeaders::new(block_id, max_headers, skip, reverse))
 }
 
-pub fn encode_block_headers() -> Vec<u8> {
-    EMPTY_LIST_RLP.to_vec()
+fn encode_block_header(stream: &mut RlpStream, header: &BlockHeader) {
+    let mut header_stream = stream.begin_list(15);
+    header_stream
+        .append(&header.parent_hash)
+        .append(&header.ommers_hash)
+        .append(&header.beneficiary_address)
+        .append(&header.state_root)
+        .append(&header.transactions_root)
+        .append(&header.receipts_root)
+        .append(&header.logs_bloom)
+        .append(&header.difficulty)
+        .append(&header.number)
+        .append(&header.gas_limit)
+        .append(&header.gas_used)
+        .append(&header.timestamp)
+        .append(&header.extra_data)
+        .append(&header.mix_hash)
+        .append(&header.nonce);
+}
+
+pub fn encode_block_headers(headers: &[BlockHeader]) -> Vec<u8> {
+    let mut stream = RlpStream::new_list(headers.len());
+    for header in headers {
+        encode_block_header(&mut stream, &header);
+    }
+    stream.out()
+}
+
+fn decode_block_header(header: &Rlp) -> Result<BlockHeader, DecoderError> {
+    Ok(BlockHeader {
+        parent_hash: H256::from_slice(header.at(0)?.data()?),
+        ommers_hash: H256::from_slice(header.at(1)?.data()?),
+        beneficiary_address: H160::from_slice(header.at(2)?.data()?),
+        state_root: H256::from_slice(header.at(3)?.data()?),
+        transactions_root: H256::from_slice(header.at(4)?.data()?),
+        receipts_root: H256::from_slice(header.at(5)?.data()?),
+        logs_bloom: header.val_at(6)?,
+        difficulty: header.val_at(7)?,
+        number: header.val_at(8)?,
+        gas_limit: header.val_at(9)?,
+        gas_used: header.val_at(10)?,
+        timestamp: header.val_at(11)?,
+        extra_data: header.val_at(12)?,
+        mix_hash: H256::from_slice(header.at(13)?.data()?),
+        nonce: header.val_at(14)?,
+    })
 }
 
 pub fn decode_block_headers(data: &[u8]) -> Result<Vec<BlockHeader>, DecoderError> {
     let encoded_headers = Rlp::new(data);
     let mut decoded_headers = vec![];
-
     for header in encoded_headers.iter() {
-        decoded_headers.push(BlockHeader {
-            parent_hash: H256::from_slice(header.at(0)?.data()?),
-            ommers_hash: H256::from_slice(header.at(1)?.data()?),
-            beneficiary_address: H160::from_slice(header.at(2)?.data()?),
-            state_root: H256::from_slice(header.at(3)?.data()?),
-            transactions_root: H256::from_slice(header.at(4)?.data()?),
-            receipts_root: H256::from_slice(header.at(5)?.data()?),
-            logs_bloom: header.val_at(6)?,
-            difficulty: header.val_at(7)?,
-            number: header.val_at(8)?,
-            gas_limit: header.val_at(9)?,
-            gas_used: header.val_at(10)?,
-            timestamp: header.val_at(11)?,
-            extra_data: header.val_at(12)?,
-            mix_hash: H256::from_slice(header.at(13)?.data()?),
-            nonce: header.val_at(14)?,
-        });
+        decoded_headers.push(decode_block_header(&header)?);
     }
-
     Ok(decoded_headers)
 }
 
-pub fn encode_block_bodies() -> Vec<u8> {
-    EMPTY_LIST_RLP.to_vec()
+pub fn encode_get_block_bodies(hashes: &[H256]) -> Vec<u8> {
+    let mut stream = RlpStream::new_list(hashes.len());
+    for hash in hashes {
+        stream.append(hash);
+    }
+    stream.out()
+}
+
+pub fn decode_get_block_bodies(data: &[u8]) -> Result<Vec<H256>, DecoderError> {
+    let rlp = Rlp::new(data);
+    let mut hashes = vec![];
+    for item in rlp.iter() {
+        hashes.push(H256::from_slice(item.data()?));
+    }
+    Ok(hashes)
+}
+
+fn encode_block_transaction(stream: &mut RlpStream, transaction: &BlockTransaction) {
+    let tx_stream = stream.begin_list(9);
+    tx_stream
+        .append(&transaction.nonce)
+        .append(&transaction.gas_price)
+        .append(&transaction.gas_limit)
+        .append(&transaction.to)
+        .append(&transaction.value)
+        .append(&transaction.input_data)
+        .append(&transaction.v)
+        .append(&transaction.r)
+        .append(&transaction.s);
+}
+
+fn encode_block_body(stream: &mut RlpStream, block_body: &BlockBody) {
+    let block_stream = stream.begin_list(2);
+    let mut transactions_stream = block_stream.begin_list(block_body.transactions.len());
+    for ref transaction in &block_body.transactions {
+        encode_block_transaction(&mut transactions_stream, transaction);
+    }
+    let mut ommers_stream = block_stream.begin_list(block_body.ommers.len());
+    for ref ommer in &block_body.ommers {
+        encode_block_header(&mut ommers_stream, ommer);
+    }
+}
+
+pub fn encode_block_bodies(block_bodies: &[BlockBody]) -> Vec<u8> {
+    let mut stream = RlpStream::new_list(block_bodies.len());
+    for block_body in block_bodies {
+        encode_block_body(&mut stream, &block_body);
+    }
+    stream.out()
+}
+
+fn decode_block_transaction(transaction: &Rlp) -> Result<BlockTransaction, DecoderError> {
+    Ok(BlockTransaction {
+        nonce: U256::from_big_endian(transaction.at(0)?.data()?),
+        gas_price: U256::from_big_endian(transaction.at(1)?.data()?),
+        gas_limit: U256::from_big_endian(transaction.at(2)?.data()?),
+        to: H160::from_slice(transaction.at(3)?.data()?),
+        value: U256::from_big_endian(transaction.at(4)?.data()?),
+        input_data: transaction.val_at(5)?,
+        v: transaction.val_at(6)?,
+        r: U256::from_big_endian(transaction.at(7)?.data()?),
+        s: U256::from_big_endian(transaction.at(8)?.data()?)
+    })
+}
+
+fn decode_block_body(body: &Rlp) -> Result<BlockBody, DecoderError> {
+    let mut transactions = vec![];
+    for ref transaction in body.at(0)?.iter() {
+        transactions.push(decode_block_transaction(transaction)?);
+    }
+    let mut ommers = vec![];
+    for ref ommer in body.at(1)?.iter() {
+        ommers.push(decode_block_header(ommer)?);
+    }
+    Ok(BlockBody { transactions, ommers })
+}
+
+pub fn decode_block_bodies(data: &[u8]) -> Result<Vec<BlockBody>, DecoderError> {
+    let encoded_bodies = Rlp::new(data);
+    let mut decoded_bodies = vec![];
+    for ref body in encoded_bodies.iter() {
+        decoded_bodies.push(decode_block_body(body)?);
+    }
+    Ok(decoded_bodies)
 }
 
 #[cfg(test)]
@@ -122,5 +230,33 @@ mod tests {
         let header = vec![249, 2, 26, 249, 2, 23, 160, 150, 107, 246, 132, 157, 169, 47, 242, 160, 227, 219, 154, 55, 31, 91, 159, 7, 221, 96, 1, 226, 119, 10, 66, 105, 165, 193, 52, 241, 191, 156, 76, 160, 29, 204, 77, 232, 222, 199, 93, 122, 171, 133, 181, 103, 182, 204, 212, 26, 211, 18, 69, 27, 148, 138, 116, 19, 240, 161, 66, 253, 64, 212, 147, 71, 148, 234, 103, 79, 221, 231, 20, 253, 151, 157, 227, 237, 240, 245, 106, 169, 113, 107, 137, 142, 200, 160, 116, 71, 126, 170, 190, 206, 107, 206, 0, 195, 70, 220, 18, 39, 91, 46, 215, 78, 201, 214, 199, 88, 196, 2, 60, 32, 64, 186, 14, 114, 224, 93, 160, 20, 230, 203, 133, 194, 42, 226, 253, 119, 79, 24, 204, 214, 103, 211, 254, 150, 125, 110, 57, 235, 197, 34, 70, 131, 127, 35, 15, 2, 248, 69, 221, 160, 195, 99, 51, 64, 229, 167, 39, 232, 170, 29, 41, 163, 175, 206, 149, 210, 126, 85, 90, 49, 167, 176, 151, 41, 103, 47, 55, 108, 47, 63, 78, 46, 185, 1, 0, 136, 100, 128, 192, 2, 0, 98, 13, 132, 24, 13, 4, 112, 0, 12, 80, 48, 129, 22, 0, 68, 208, 80, 21, 128, 128, 3, 116, 1, 16, 112, 96, 18, 0, 64, 16, 82, 129, 16, 1, 0, 16, 69, 0, 65, 66, 3, 4, 10, 32, 128, 3, 72, 20, 32, 6, 16, 218, 18, 8, 166, 56, 209, 110, 68, 12, 2, 72, 128, 128, 3, 1, 225, 0, 76, 43, 2, 40, 80, 96, 32, 0, 8, 76, 50, 73, 160, 192, 132, 86, 156, 144, 194, 0, 32, 1, 88, 98, 65, 4, 30, 128, 4, 3, 90, 68, 0, 160, 16, 9, 56, 0, 30, 4, 17, 128, 8, 49, 128, 176, 52, 6, 97, 55, 32, 96, 64, 20, 40, 192, 32, 8, 116, 16, 64, 43, 148, 132, 2, 129, 0, 4, 148, 129, 144, 12, 8, 3, 72, 100, 49, 70, 136, 208, 1, 84, 140, 48, 0, 130, 142, 84, 34, 132, 24, 2, 128, 0, 100, 2, 162, 138, 2, 100, 218, 0, 172, 34, 48, 4, 0, 98, 9, 96, 152, 50, 6, 96, 50, 0, 8, 64, 64, 18, 42, 71, 57, 8, 5, 1, 37, 21, 66, 8, 32, 32, 164, 8, 124, 0, 2, 129, 192, 136, 0, 137, 141, 9, 0, 2, 64, 71, 56, 0, 0, 18, 112, 56, 9, 142, 9, 8, 1, 8, 0, 0, 66, 144, 200, 66, 1, 102, 16, 64, 32, 2, 1, 192, 0, 75, 132, 144, 173, 88, 136, 4, 135, 8, 121, 44, 111, 71, 247, 15, 131, 152, 150, 128, 131, 152, 112, 92, 131, 152, 36, 179, 132, 94, 176, 23, 5, 150, 80, 80, 89, 69, 45, 101, 116, 104, 101, 114, 109, 105, 110, 101, 45, 97, 115, 105, 97, 49, 45, 49, 160, 55, 253, 227, 17, 117, 254, 24, 3, 70, 68, 77, 21, 180, 223, 198, 169, 218, 59, 43, 65, 238, 34, 152, 206, 236, 202, 248, 136, 178, 212, 93, 244, 136, 47, 105, 35, 248, 4, 38, 241, 87];
         let decoded = decode_block_headers(&header);
         assert!(decoded.is_ok(), "Error: {}", decoded.err().unwrap());
+    }
+
+    #[test]
+    fn test_block_body_roundtrip() {
+        let tx = BlockTransaction {
+            nonce: U256::from(11),
+            gas_price: U256::from(77000000),
+            gas_limit: U256::from(21000),
+            to: H160::repeat_byte(3u8),
+            value: U256::from(0),
+            input_data: vec![1, 2, 3],
+            v: 6,
+            r: U256::from(7),
+            s: U256::from(8),
+        };
+        let block_body = BlockBody { transactions: vec![tx.clone()], ommers: vec![] };
+        let block_bodies = vec![block_body.clone()];
+        let encoded = encode_block_bodies(&block_bodies);
+        let decoded = decode_block_bodies(&encoded).unwrap();
+        assert_eq!(block_body, decoded[0]);
+    }
+
+    #[test]
+    fn test_block_body_with_ommer_roundtrip() {
+        let encoded = std::fs::read("src/block_manager/test_data/block_11_927_383").unwrap();
+        let decoded = decode_block_bodies(&encoded).unwrap();
+        let recovered = encode_block_bodies(&decoded);
+        assert_eq!(encoded, recovered);
     }
 }
