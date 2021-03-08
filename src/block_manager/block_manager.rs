@@ -4,6 +4,8 @@
 use std::sync::{Arc, Mutex};
 use super::rlp_en_de::{
     decode_block_headers,
+    decode_new_block,
+    decode_new_block_hashes,
     encode_block_headers,
     encode_block_bodies,
     encode_get_block_bodies,
@@ -11,13 +13,14 @@ use super::rlp_en_de::{
 };
 use crate::{
     client_adapter::Blockchain,
-    common_types::{BlockId, GetBlockHeaders},
+    common_types::{BlockId, BlockBody, GetBlockHeaders},
+    devp2p_adapter::PeerPenal,
     scheduler::PeerOrganizer,
     scheduler::peer_organizer::{ErrorAct, InitialRequest, PeerId, Task},
     scheduler::protocol::{ProtocolId, MessageId, EthMessageId}
 };
 use primitive_types::H256;
-use crate::block_manager::rlp_en_de::decode_block_bodies;
+use crate::block_manager::rlp_en_de::{decode_block_bodies, decode_get_block_headers, decode_get_block_bodies};
 
 pub struct BlockManager {
     chain: Arc<Mutex<dyn Blockchain + Send + Sync>>,
@@ -59,29 +62,63 @@ impl BlockManager {
         }
     }
 
-    pub fn api_new_block_hashes(&self) -> Result<Task,ErrorAct> {
-        //Task::InsertPeer()
-        ErrorAct::new_kick("TEST".into()).map(|_| Task::None)
+    pub fn api_new_block_hashes(&self, peer: &PeerId, data: &[u8]) -> Result<Task,ErrorAct> {
+        match decode_new_block_hashes(data) {
+            Ok(hashes) => {
+                info!("Blockhashes: {:?}", hashes);
+                Ok(Task::None)  // Task::InsertPeer()
+            },
+            Err(err) => ErrorAct::new_kick_generic(
+                format!("Invalid NewBlockHashes request: {}", err)
+            )
+        }
     }
 
-    pub fn api_get_block_headers(&self, peer: &PeerId) -> Result<Task, ErrorAct> {
-        let headers = vec![];
-        Ok(Task::Responde(
-            *peer,
-            ProtocolId::Eth,
-            MessageId::Eth(EthMessageId::BlockHeaders),
-            encode_block_headers(&headers),
-        ))
+    pub fn api_get_block_headers(&self, peer: &PeerId, data: &[u8]) -> Result<Task, ErrorAct> {
+        match decode_get_block_headers(data) {
+            Ok(request) => {
+                Ok(Task::Responde(
+                    *peer,
+                    ProtocolId::Eth,
+                    MessageId::Eth(EthMessageId::BlockHeaders),
+                    encode_block_headers(&self.chain.lock().unwrap().block_headers(request)),
+                ))
+            },
+            Err(err) => {
+                ErrorAct::new_kick_generic::<Task>(
+                    format!("Invalid GetBlockHeaders request: {}", err)
+                )
+            }
+        }
+
     }
 
-    pub fn api_get_block_bodies(&self, peer: &PeerId) -> Result<Task, ErrorAct> {
-        let bodies = vec![];
-        Ok(Task::Responde(
-            *peer,
-            ProtocolId::Eth,
-            MessageId::Eth(EthMessageId::BlockBodies),
-            encode_block_bodies(&bodies),
-        ))
+    fn retrieve_block_bodies(&self, hashes: &[H256]) -> Vec<BlockBody> {
+        let mut bodies = vec![];
+        for ref hash in hashes {
+            if let Some(body) = self.chain.lock().unwrap().block_body(hash) {
+                bodies.push(body);
+            }
+        }
+        bodies
+    }
+
+    pub fn api_get_block_bodies(&self, peer: &PeerId, data: &[u8]) -> Result<Task, ErrorAct> {
+        match decode_get_block_bodies(data) {
+            Ok(ref hashes) => {
+                Ok(Task::Responde(
+                    *peer,
+                    ProtocolId::Eth,
+                    MessageId::Eth(EthMessageId::BlockBodies),
+                    encode_block_bodies(&self.retrieve_block_bodies(hashes)),
+                ))
+            },
+            Err(err) => {
+                ErrorAct::new_kick_generic::<Task>(
+                    format!("Invalid GetBlockBodies request: {}", err)
+                )
+            }
+        }
     }
 
     pub fn process_block_headers(&self, data: &[u8]) {
@@ -108,6 +145,19 @@ impl BlockManager {
         }
     }
 
-    pub fn api_new_block(&self) {}
+    pub fn api_new_block(&self, data: &[u8]) -> Result<Task, ErrorAct> {
+        match decode_new_block(data) {
+            Ok(new_block) => {
+                info!("NewBlock: {:?}", new_block);
+                Ok(Task::None)
+            },
+            Err(err) => {
+                ErrorAct::new_kick_generic(
+                format!("Invalid NewBlockHashes request: {}", err)
+                )
+            }
+        }
+    }
+
     pub fn api_get_receipts(&self) {}
 }

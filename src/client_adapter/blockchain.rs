@@ -1,11 +1,13 @@
 // Copyright 2020 Gnosis Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::common_types::{BlockNumber, BlockHeader, BlockBody};
+use crate::common_types::{BlockNumber, BlockHeader, BlockBody, GetBlockHeaders};
+use primitive_types::H256;
 
 pub trait Blockchain {
     fn block_header(&self, number: BlockNumber) -> Option<BlockHeader>;
-    fn block_body(&self);
+    fn block_headers(&self, request: GetBlockHeaders) -> Vec<BlockHeader>;
+    fn block_body(&self, hash: &H256) -> Option<BlockBody>;
     fn block_receipt(&self);
     fn best_block_header(&self) -> Option<&BlockNumber>;
 
