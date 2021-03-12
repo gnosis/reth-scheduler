@@ -10,6 +10,18 @@ pub enum BlockId {
     Hash(H256),
 }
 
+#[derive(Debug, PartialEq)]
+pub struct NewBlockHash {
+    pub hash: H256,
+    pub number: BlockNumber,
+}
+
+impl NewBlockHash {
+    pub fn new(hash: H256, number: BlockNumber) -> Self {
+        NewBlockHash { hash, number }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct GetBlockHeaders {
     pub block_id: BlockId,
@@ -60,4 +72,12 @@ pub struct BlockTransaction {
 pub struct BlockBody {
     pub transactions: Vec<BlockTransaction>,
     pub ommers: Vec<BlockHeader>,
+}
+
+#[derive(Debug)]
+pub struct NewBlock {
+    pub header: BlockHeader,
+    pub transactions: Vec<BlockTransaction>,
+    pub ommers: Vec<BlockHeader>,
+    pub score: U256,
 }

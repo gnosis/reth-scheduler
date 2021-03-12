@@ -3,7 +3,36 @@
 
 use primitive_types::{H160, H256, U256};
 use rlp::{RlpStream, Rlp, DecoderError};
-use crate::common_types::{BlockHeader, BlockId, BlockNumber, GetBlockHeaders, BlockBody, BlockTransaction};
+use crate::common_types::{
+    BlockHeader, BlockId, BlockNumber, GetBlockHeaders,
+    BlockBody, BlockTransaction, NewBlock, NewBlockHash
+};
+
+pub fn encode_new_block_hashes(request: &[NewBlockHash]) -> Vec<u8> {
+    let mut stream = RlpStream::new_list(request.len());
+
+    for block in request {
+        stream.begin_list(2)
+            .append(&block.hash)
+            .append(&block.number);
+    }
+
+    stream.out()
+}
+
+pub fn decode_new_block_hashes(data: &[u8]) -> Result<Vec<NewBlockHash>, DecoderError> {
+    let encoded_hashes = Rlp::new(data);
+    let mut decoded_hashes = vec![];
+
+    for ref encoded_hash in encoded_hashes.iter() {
+        decoded_hashes.push(NewBlockHash {
+            hash: H256::from_slice(encoded_hash.at(0)?.data()?),
+            number: encoded_hash.val_at(1)?,
+        })
+    }
+
+    Ok(decoded_hashes)
+}
 
 pub fn encode_get_block_headers(request: &GetBlockHeaders) -> Vec<u8> {
     let mut stream = RlpStream::new_list(4);
@@ -26,7 +55,7 @@ pub fn encode_get_block_headers(request: &GetBlockHeaders) -> Vec<u8> {
     stream.out()
 }
 
-pub fn decode_get_block_headers(data: &Vec<u8>) -> Result<GetBlockHeaders, DecoderError> {
+pub fn decode_get_block_headers(data: &[u8]) -> Result<GetBlockHeaders, DecoderError> {
     let rlp = Rlp::new(data);
 
     let block_id_rlp = rlp.at(0)?;
@@ -185,9 +214,61 @@ pub fn decode_block_bodies(data: &[u8]) -> Result<Vec<BlockBody>, DecoderError> 
     Ok(decoded_bodies)
 }
 
+pub fn encode_new_block(new_block: &NewBlock) -> Vec<u8> {
+    let mut stream = RlpStream::new_list(2);
+    let mut first_part = stream.begin_list(3);
+
+    encode_block_header(&mut first_part, &new_block.header);
+
+    let mut transaction_stream = first_part.begin_list(new_block.transactions.len());
+    for ref transaction in &new_block.transactions {
+        encode_block_transaction(&mut transaction_stream, transaction);
+    }
+
+    let mut ommer_stream = first_part.begin_list(new_block.ommers.len());
+    for ref ommer in &new_block.ommers {
+        encode_block_header(&mut ommer_stream, ommer);
+    }
+
+    stream.append(&new_block.score);
+
+    stream.out()
+}
+
+pub fn decode_new_block(data: &[u8]) -> Result<NewBlock, DecoderError> {
+    let encoded = Rlp::new(data);
+
+    let header = decode_block_header(&encoded.at(0)?.at(0)?)?;
+
+    let mut transactions = vec![];
+    for ref transaction in encoded.at(0)?.at(1)?.iter() {
+         transactions.push(decode_block_transaction(transaction)?);
+    }
+
+    let mut ommers = vec![];
+    for ref ommer in encoded.at(0)?.at(2)?.iter() {
+        ommers.push(decode_block_header(ommer)?);
+    }
+
+    let score = U256::from_big_endian(&encoded.at(1)?.data()?);
+
+    Ok(NewBlock{ header, transactions, ommers, score })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_new_block_hashes_roundtrip() {
+        let request = vec![
+            NewBlockHash::new(H256::repeat_byte(0x10), 42),
+            NewBlockHash::new(H256::repeat_byte(0x22), 13),
+        ];
+        let encoded = encode_new_block_hashes(&request);
+        let decoded = decode_new_block_hashes(&encoded).unwrap();
+        assert_eq!(request, decoded);
+    }
 
     #[test]
     fn test_encode_get_block_headers() {

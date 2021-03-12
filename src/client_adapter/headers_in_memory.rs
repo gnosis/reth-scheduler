@@ -3,7 +3,8 @@
 
 use std::collections::HashMap;
 use super::blockchain::Blockchain;
-use crate::common_types::{BlockNumber, BlockHeader, BlockBody};
+use crate::common_types::{BlockNumber, BlockHeader, BlockBody, GetBlockHeaders, BlockId};
+use primitive_types::H256;
 
 pub struct HeadersInMemory {
     headers: HashMap<BlockNumber, BlockHeader>,
@@ -24,8 +25,28 @@ impl Blockchain for HeadersInMemory {
         clone_option(self.headers.get(&number))
     }
 
-    fn block_body(&self) {
-        unimplemented!()
+    fn block_headers(&self, request: GetBlockHeaders) -> Vec<BlockHeader> {
+        let mut headers = vec![];
+        let mut block_number = match request.block_id {
+            BlockId::Hash(hash) => { return headers; }, // TODO
+            BlockId::Number(number) => number
+        };
+        while let Some(header) = self.block_header(block_number) {
+            headers.push(header);
+            if headers.len() as u64 >= request.max_headers {
+                break;
+            }
+            if request.reverse {
+                block_number -= request.skip + 1
+            } else {
+                block_number += request.skip + 1
+            }
+        }
+        headers
+    }
+
+    fn block_body(&self, hash: &H256) -> Option<BlockBody> {
+        None
     }
 
     fn block_receipt(&self) {

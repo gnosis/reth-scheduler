@@ -72,6 +72,13 @@ impl ErrorAct {
         })
     }
 
+    pub fn new_kick_generic<T>(reason: String) -> Result<T, ErrorAct> {
+        Err(ErrorAct{
+            penal: PeerPenal::Kick,
+            reason: reason,
+        })
+    }
+
     pub fn penal(&self) -> PeerPenal {
         self.penal
     }
